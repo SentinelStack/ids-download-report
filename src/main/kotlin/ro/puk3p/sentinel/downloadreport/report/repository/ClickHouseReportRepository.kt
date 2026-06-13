@@ -77,7 +77,7 @@ class ClickHouseReportRepository(
         return runQuery(sql, emptyList()) { rs -> if (rs.next()) rs.getLong(1) else 0L }
     }
 
-    /** 24 hourly buckets over the last 24h (oldest→newest), aligned to ClickHouse's clock. */
+    /** 8 three-hour buckets over the last 24h (oldest→newest), aligned to ClickHouse's clock. */
     fun threatVolume(): ThreatVolumeView {
         val nowHour =
             runQuery("SELECT toUnixTimestamp(toStartOfHour(now()))", emptyList()) { rs ->
@@ -90,7 +90,9 @@ class ClickHouseReportRepository(
             emptyList(),
         ) { rs -> while (rs.next()) counts[rs.getLong("h")] = rs.getLong("c") }
 
-        val series = (0 until 24).map { i -> counts[nowHour - (23 - i) * 3600L] ?: 0L }
+        // 24 hourly counts (oldest -> newest), aggregated into 3-hour buckets (8 bars).
+        val hourly = (0 until 24).map { i -> counts[nowHour - (23 - i) * 3600L] ?: 0L }
+        val series = hourly.chunked(VOLUME_BUCKET_HOURS).map { it.sum() }
         val max = (series.maxOrNull() ?: 0L).coerceAtLeast(1L)
         val threshold = max * 0.75
         val bars = series.map { VolumeBar(((it.toDouble() / max) * 100).roundToInt(), it >= threshold && it > 0) }
@@ -180,6 +182,9 @@ class ClickHouseReportRepository(
     private fun isoUtc(instant: Instant): String = TS.format(instant)
 
     companion object {
+        /** Hours per threat-volume bar — 24h / 3 = 8 bars. */
+        private const val VOLUME_BUCKET_HOURS = 3
+
         private const val EXPORT_COLUMNS =
             "alertId, timestamp, type, severity, protocol, sourceIp, sourcePort, " +
                 "destinationIp, destinationPort, packetCount, bytesCount, windowSeconds, " +
