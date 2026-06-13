@@ -39,6 +39,8 @@ jobs:
     uses: SentinelStack/ids-infra-devops/.github/workflows/reusable-maven-publish-nexus.yml@main
     with:
       java_version: "21"
+      # Bump the release version per run so immutable Nexus releases never collide.
+      maven_deploy_command: "mvn -B -ntp versions:set -DnewVersion=1.0.${{ github.run_number }} -DgenerateBackupPoms=false && mvn -B -ntp -DskipTests deploy"
     secrets:
       nexus_username: ${{ secrets.NEXUS_USERNAME }}
       nexus_password: ${{ secrets.NEXUS_PASSWORD }}
