@@ -1,5 +1,9 @@
 package ro.puk3p.sentinel.downloadreport.report.controller
 
+import org.springframework.hateoas.CollectionModel
+import org.springframework.hateoas.EntityModel
+import org.springframework.hateoas.server.mvc.WebMvcLinkBuilder.linkTo
+import org.springframework.hateoas.server.mvc.WebMvcLinkBuilder.methodOn
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
@@ -25,14 +29,31 @@ import java.time.format.DateTimeFormatter
 class ReportController(
     private val reportService: ReportService,
 ) {
-    /** Filter options + the lake's available date span, to drive a download form. */
+    /** Filter options + the store's available date span, to drive a download form. */
     @GetMapping("/meta")
-    fun meta(): ApiResponse<FilterMeta> = ApiResponse.ok(reportService.meta(), "Filter metadata")
+    fun meta(): ApiResponse<EntityModel<FilterMeta>> {
+        val model =
+            EntityModel.of(
+                reportService.meta(),
+                linkTo(methodOn(ReportController::class.java).meta()).withSelfRel(),
+                linkTo(methodOn(ReportController::class.java).preview(AlertFilterParams())).withRel("preview"),
+                linkTo(methodOn(ReportController::class.java).curated()).withRel("curated"),
+            )
+        return ApiResponse.ok(model, "Filter metadata")
+    }
 
     /** Small JSON preview of what an alert export would contain. */
     @GetMapping("/alerts/preview")
-    fun preview(params: AlertFilterParams): ApiResponse<PreviewResponse> =
-        ApiResponse.ok(reportService.previewAlerts(reportService.buildFilter(params)), "Preview")
+    fun preview(params: AlertFilterParams): ApiResponse<EntityModel<PreviewResponse>> {
+        val preview = reportService.previewAlerts(reportService.buildFilter(params))
+        val model =
+            EntityModel.of(
+                preview,
+                linkTo(methodOn(ReportController::class.java).preview(params)).withSelfRel(),
+                linkTo(methodOn(ReportController::class.java).meta()).withRel("meta"),
+            )
+        return ApiResponse.ok(model, "Preview")
+    }
 
     /** Download filtered alerts (CSV/JSON). */
     @GetMapping("/alerts/download")
@@ -46,12 +67,19 @@ class ReportController(
         return download("alerts", fmt, body)
     }
 
-    /** List the curated batch reports available in the lake. */
+    /** List the curated reports. */
     @GetMapping("/curated")
-    fun curated(): ApiResponse<List<CuratedReportInfo>> =
-        ApiResponse.ok(reportService.curatedCatalog(), "Curated reports")
+    fun curated(): ApiResponse<CollectionModel<CuratedReportInfo>> {
+        val model =
+            CollectionModel.of(
+                reportService.curatedCatalog(),
+                linkTo(methodOn(ReportController::class.java).curated()).withSelfRel(),
+                linkTo(methodOn(ReportController::class.java).meta()).withRel("meta"),
+            )
+        return ApiResponse.ok(model, "Curated reports")
+    }
 
-    /** Download a curated batch report from the lake (CSV/JSON). */
+    /** Download a curated report (CSV/JSON). */
     @GetMapping("/curated/{name}/download")
     fun downloadCurated(
         @PathVariable name: String,
@@ -70,8 +98,12 @@ class ReportController(
     ): ResponseEntity<StreamingResponseBody> {
         val stamp = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").withZone(ZoneOffset.UTC).format(java.time.Instant.now())
         val filename = "sentinel-$base-$stamp.${format.extension}"
+        // File downloads can't carry body links, so advertise hypermedia via the
+        // RFC 8288 Link header (the catalog/form that describes this export).
+        val metaUri = linkTo(methodOn(ReportController::class.java).meta()).toUri()
         return ResponseEntity.ok()
             .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"$filename\"")
+            .header(HttpHeaders.LINK, "<$metaUri>; rel=\"describedby\"")
             .contentType(MediaType.parseMediaType(format.contentType))
             .body(body)
     }
