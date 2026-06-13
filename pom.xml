@@ -12,7 +12,7 @@
 
     <groupId>ro.puk3p.sentinel</groupId>
     <artifactId>ids-download-report</artifactId>
-    <version>1.0.0</version>
+    <version>1.0.1</version>
     <name>ids-download-report</name>
     <description>Report download service — filtered exports served directly from the S3 alert lake</description>
 

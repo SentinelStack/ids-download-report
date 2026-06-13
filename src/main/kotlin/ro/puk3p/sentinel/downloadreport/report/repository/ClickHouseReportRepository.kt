@@ -100,9 +100,23 @@ class ClickHouseReportRepository(
         filter.sourceIp?.let { clauses += "sourceIp = ?"; params += it }
         filter.destinationIp?.let { clauses += "destinationIp = ?"; params += it }
         filter.deviceId?.let { clauses += "deviceId = ?"; params += it }
+        filter.sourcePort?.let { clauses += "sourcePort = ?"; params += it }
         filter.destinationPort?.let { clauses += "destinationPort = ?"; params += it }
         filter.minPacketCount?.let { clauses += "packetCount >= ?"; params += it }
+        filter.maxPacketCount?.let { clauses += "packetCount <= ?"; params += it }
+        filter.minBytes?.let { clauses += "bytesCount >= ?"; params += it }
+        filter.maxBytes?.let { clauses += "bytesCount <= ?"; params += it }
+        filter.minWindowSeconds?.let { clauses += "windowSeconds >= ?"; params += it }
         filter.acknowledged?.let { clauses += "acknowledged = ?"; params += if (it) 1 else 0 }
+        filter.alertId?.let { clauses += "alertId = ?"; params += it }
+        filter.search?.let {
+            val like = "%$it%"
+            clauses += "(sourceIp ILIKE ? OR destinationIp ILIKE ? OR alertId ILIKE ? OR description ILIKE ?)"
+            params += like
+            params += like
+            params += like
+            params += like
+        }
 
         if (clauses.isNotEmpty()) {
             sql.append(" WHERE ").append(clauses.joinToString(" AND "))

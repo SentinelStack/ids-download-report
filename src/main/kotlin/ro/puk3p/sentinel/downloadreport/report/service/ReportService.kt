@@ -8,6 +8,7 @@ import ro.puk3p.sentinel.downloadreport.report.dto.DateRange
 import ro.puk3p.sentinel.downloadreport.report.dto.FilterMeta
 import ro.puk3p.sentinel.downloadreport.report.dto.PreviewResponse
 import ro.puk3p.sentinel.downloadreport.report.model.AlertFilter
+import ro.puk3p.sentinel.downloadreport.report.model.AlertFilterParams
 import ro.puk3p.sentinel.downloadreport.report.model.CuratedReport
 import ro.puk3p.sentinel.downloadreport.report.model.ReportFormat
 import ro.puk3p.sentinel.downloadreport.report.repository.ClickHouseReportRepository
@@ -52,42 +53,37 @@ class ReportService(
         )
 
     /** Build a validated, clamped filter from raw request parameters. */
-    @Suppress("LongParameterList")
-    fun buildFilter(
-        from: String?,
-        to: String?,
-        severity: String?,
-        type: String?,
-        protocol: String?,
-        sourceIp: String?,
-        destinationIp: String?,
-        deviceId: String?,
-        destinationPort: Int?,
-        minPacketCount: Long?,
-        acknowledged: Boolean?,
-        limit: Int?,
-    ): AlertFilter {
-        val parsedFrom = parseInstant("from", from)
-        val parsedTo = parseInstant("to", to)
+    fun buildFilter(p: AlertFilterParams): AlertFilter {
+        val parsedFrom = parseInstant("from", p.from)
+        val parsedTo = parseInstant("to", p.to)
         if (parsedFrom != null && parsedTo != null && parsedFrom.isAfter(parsedTo)) {
             throw BadRequestException("'from' must be before 'to'")
         }
-        val clampedLimit = (limit ?: limits.defaultRows).coerceIn(1, limits.maxRows)
+        val clampedLimit = (p.limit ?: limits.defaultRows).coerceIn(1, limits.maxRows)
         return AlertFilter(
             from = parsedFrom,
             to = parsedTo,
-            severity = severity?.trim()?.takeIf { it.isNotEmpty() },
-            type = type?.trim()?.takeIf { it.isNotEmpty() },
-            protocol = protocol?.trim()?.takeIf { it.isNotEmpty() },
-            sourceIp = sourceIp?.trim()?.takeIf { it.isNotEmpty() },
-            destinationIp = destinationIp?.trim()?.takeIf { it.isNotEmpty() },
-            deviceId = deviceId?.trim()?.takeIf { it.isNotEmpty() },
-            destinationPort = destinationPort,
-            minPacketCount = minPacketCount,
-            acknowledged = acknowledged,
+            severity = p.severity.clean(),
+            type = p.type.clean(),
+            protocol = p.protocol.clean(),
+            sourceIp = p.sourceIp.clean(),
+            destinationIp = p.destinationIp.clean(),
+            deviceId = p.deviceId.clean(),
+            sourcePort = p.sourcePort,
+            destinationPort = p.destinationPort,
+            minPacketCount = p.minPacketCount,
+            maxPacketCount = p.maxPacketCount,
+            minBytes = p.minBytes,
+            maxBytes = p.maxBytes,
+            minWindowSeconds = p.minWindowSeconds,
+            acknowledged = p.acknowledged,
+            alertId = p.alertId.clean(),
+            search = p.search.clean(),
             limit = clampedLimit,
         )
     }
+
+    private fun String?.clean(): String? = this?.trim()?.takeIf { it.isNotEmpty() }
 
     /** Accepts a full ISO-8601 instant (…Z) or a plain yyyy-MM-dd date (UTC). */
     private fun parseInstant(

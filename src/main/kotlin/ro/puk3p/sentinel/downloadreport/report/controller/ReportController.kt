@@ -13,6 +13,7 @@ import ro.puk3p.sentinel.downloadreport.common.ApiResponse
 import ro.puk3p.sentinel.downloadreport.report.dto.CuratedReportInfo
 import ro.puk3p.sentinel.downloadreport.report.dto.FilterMeta
 import ro.puk3p.sentinel.downloadreport.report.dto.PreviewResponse
+import ro.puk3p.sentinel.downloadreport.report.model.AlertFilterParams
 import ro.puk3p.sentinel.downloadreport.report.model.CuratedReport
 import ro.puk3p.sentinel.downloadreport.report.model.ReportFormat
 import ro.puk3p.sentinel.downloadreport.report.service.ReportService
@@ -30,53 +31,17 @@ class ReportController(
 
     /** Small JSON preview of what an alert export would contain. */
     @GetMapping("/alerts/preview")
-    @Suppress("LongParameterList")
-    fun preview(
-        @RequestParam(required = false) from: String?,
-        @RequestParam(required = false) to: String?,
-        @RequestParam(required = false) severity: String?,
-        @RequestParam(required = false) type: String?,
-        @RequestParam(required = false) protocol: String?,
-        @RequestParam(required = false) sourceIp: String?,
-        @RequestParam(required = false) destinationIp: String?,
-        @RequestParam(required = false) deviceId: String?,
-        @RequestParam(required = false) destinationPort: Int?,
-        @RequestParam(required = false) minPacketCount: Long?,
-        @RequestParam(required = false) acknowledged: Boolean?,
-        @RequestParam(required = false) limit: Int?,
-    ): ApiResponse<PreviewResponse> {
-        val filter =
-            reportService.buildFilter(
-                from, to, severity, type, protocol, sourceIp, destinationIp,
-                deviceId, destinationPort, minPacketCount, acknowledged, limit,
-            )
-        return ApiResponse.ok(reportService.previewAlerts(filter), "Preview")
-    }
+    fun preview(params: AlertFilterParams): ApiResponse<PreviewResponse> =
+        ApiResponse.ok(reportService.previewAlerts(reportService.buildFilter(params)), "Preview")
 
-    /** Download filtered alerts straight from the S3 lake (CSV/JSON). */
+    /** Download filtered alerts (CSV/JSON). */
     @GetMapping("/alerts/download")
-    @Suppress("LongParameterList")
     fun downloadAlerts(
-        @RequestParam(required = false) from: String?,
-        @RequestParam(required = false) to: String?,
-        @RequestParam(required = false) severity: String?,
-        @RequestParam(required = false) type: String?,
-        @RequestParam(required = false) protocol: String?,
-        @RequestParam(required = false) sourceIp: String?,
-        @RequestParam(required = false) destinationIp: String?,
-        @RequestParam(required = false) deviceId: String?,
-        @RequestParam(required = false) destinationPort: Int?,
-        @RequestParam(required = false) minPacketCount: Long?,
-        @RequestParam(required = false) acknowledged: Boolean?,
-        @RequestParam(required = false) limit: Int?,
+        params: AlertFilterParams,
         @RequestParam(required = false) format: String?,
     ): ResponseEntity<StreamingResponseBody> {
         val fmt = ReportFormat.from(format)
-        val filter =
-            reportService.buildFilter(
-                from, to, severity, type, protocol, sourceIp, destinationIp,
-                deviceId, destinationPort, minPacketCount, acknowledged, limit,
-            )
+        val filter = reportService.buildFilter(params)
         val body = StreamingResponseBody { out -> reportService.streamAlerts(filter, fmt, out) }
         return download("alerts", fmt, body)
     }
