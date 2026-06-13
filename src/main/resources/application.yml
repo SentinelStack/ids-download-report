@@ -4,10 +4,18 @@ server:
 spring:
   application:
     name: ids-download-report
+  datasource:
+    # compress=0: skip LZ4 (lib not bundled; connection is localhost so it's free).
+    url: ${CLICKHOUSE_URL:jdbc:clickhouse://localhost:8123/sentinel?compress=0}
+    username: ${CLICKHOUSE_USER:sentinel}
+    password: ${CLICKHOUSE_PASSWORD:}
+    driver-class-name: com.clickhouse.jdbc.ClickHouseDriver
+    hikari:
+      maximum-pool-size: ${CLICKHOUSE_POOL:8}
+      connection-timeout: 10000
   mvc:
     async:
-      # Streamed downloads scan many small Parquet files over S3; give them room.
-      request-timeout: 300000
+      request-timeout: 120000
 
 management:
   endpoints:
@@ -17,23 +25,11 @@ management:
 
 app:
   cors:
-    # Comma-separated browser origins allowed to call /api/**.
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:4200}
-  s3:
-    bucket: ${S3_BUCKET:sentinel-ids-lake}
-    region: ${AWS_REGION:eu-north-1}
-    access-key: ${AWS_ACCESS_KEY_ID:}
-    secret-key: ${AWS_SECRET_ACCESS_KEY:}
-    alerts-prefix: ${S3_ALERTS_PREFIX:alerts}
-    reports-prefix: ${S3_REPORTS_PREFIX:reports}
+  clickhouse:
+    database: ${CLICKHOUSE_DATABASE:sentinel}
+    alerts-table: ${CLICKHOUSE_ALERTS_TABLE:alerts}
   download:
     max-rows: ${DOWNLOAD_MAX_ROWS:200000}
     default-rows: ${DOWNLOAD_DEFAULT_ROWS:50000}
     preview-rows: ${DOWNLOAD_PREVIEW_ROWS:100}
-  duckdb:
-    # Writable dir for DuckDB's extension cache. Empty = auto (DUCKDB_HOME env,
-    # then user.home, then a temp dir). Set explicitly under systemd.
-    home-directory: ${DUCKDB_HOME:}
-    # Read parallelism. The lake is many small Parquet files over S3, so reads
-    # are network-bound — more threads than cores helps throughput.
-    threads: ${DUCKDB_THREADS:16}

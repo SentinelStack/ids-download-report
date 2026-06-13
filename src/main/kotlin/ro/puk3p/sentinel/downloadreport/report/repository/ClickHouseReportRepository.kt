@@ -1,10 +1,9 @@
 package ro.puk3p.sentinel.downloadreport.report.repository
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import org.duckdb.DuckDBConnection
 import org.springframework.stereotype.Repository
 import ro.puk3p.sentinel.downloadreport.common.LakeUnavailableException
-import ro.puk3p.sentinel.downloadreport.config.S3Properties
+import ro.puk3p.sentinel.downloadreport.config.ClickHouseProperties
 import ro.puk3p.sentinel.downloadreport.report.dto.DateRange
 import ro.puk3p.sentinel.downloadreport.report.dto.PreviewResponse
 import ro.puk3p.sentinel.downloadreport.report.model.AlertFilter
@@ -17,23 +16,21 @@ import java.sql.SQLException
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import javax.sql.DataSource
 
 /**
- * The S3-backed report "repository": reads the Parquet alert lake (and the
- * curated batch reports) straight from S3 via DuckDB's httpfs, applies SQL
- * filters, and streams the result out as CSV/JSON. Each call runs on its own
- * connection ([DuckDBConnection.duplicate]) so requests don't serialise.
+ * The ClickHouse-backed report repository. Alerts are streamed into ClickHouse
+ * from Kafka (Kafka engine -> materialized view -> MergeTree), so this just runs
+ * SQL against the `alerts` table — filters become indexed column predicates and
+ * the curated reports are live aggregates. Results stream out as CSV/JSON.
  */
 @Repository
-class S3ReportRepository(
-    private val root: DuckDBConnection,
-    private val s3: S3Properties,
+class ClickHouseReportRepository(
+    private val dataSource: DataSource,
+    private val ch: ClickHouseProperties,
 ) {
-    // Local mapper: only used to serialise simple result-row maps to JSON, so it
-    // doesn't depend on the framework's autoconfigured (Jackson 3) ObjectMapper.
     private val mapper = ObjectMapper()
 
-    /** Stream filtered alerts from the lake to [out]. */
     fun streamAlerts(
         filter: AlertFilter,
         format: ReportFormat,
@@ -43,10 +40,6 @@ class S3ReportRepository(
         runQuery(sql, params) { rs -> ResultStreamer.write(rs, format, out, mapper) }
     }
 
-    /**
-     * First [AlertFilter.limit] matching rows. No global count — over the raw
-     * lake that would mean a second full scan of many small files.
-     */
     fun previewAlerts(filter: AlertFilter): PreviewResponse {
         val (sql, params) = alertQuery(EXPORT_COLUMNS, filter, withOrderLimit = true)
         return runQuery(sql, params) { rs ->
@@ -68,29 +61,26 @@ class S3ReportRepository(
         }
     }
 
-    fun countAlerts(filter: AlertFilter): Long {
-        val (sql, params) = alertQuery("COUNT(*) AS c", filter, withOrderLimit = false)
-        return runQuery(sql, params) { rs -> if (rs.next()) rs.getLong(1) else 0L }
-    }
-
-    /** Earliest/latest partition date present in the lake. */
+    /** Earliest/latest alert day in the store. */
     fun dateRange(): DateRange {
-        val sql =
-            "SELECT CAST(min(dt) AS VARCHAR) AS lo, CAST(max(dt) AS VARCHAR) AS hi " +
-                "FROM read_parquet('${s3.alertsGlob()}', hive_partitioning=true)"
+        val sql = "SELECT toString(min(dt)) AS lo, toString(max(dt)) AS hi FROM ${ch.alerts()}"
         return runQuery(sql, emptyList()) { rs ->
             if (rs.next()) DateRange(rs.getString("lo"), rs.getString("hi")) else DateRange(null, null)
         }
     }
 
-    /** Stream a curated batch report (whole Parquet dataset) as CSV/JSON. */
+    fun totalRows(): Long {
+        val sql = "SELECT count() FROM ${ch.alerts()}"
+        return runQuery(sql, emptyList()) { rs -> if (rs.next()) rs.getLong(1) else 0L }
+    }
+
+    /** Stream a curated report (a live aggregate over the alerts table). */
     fun streamCurated(
         report: CuratedReport,
         format: ReportFormat,
         out: OutputStream,
     ) {
-        val sql = "SELECT * FROM read_parquet('${s3.curatedGlob(report.key)}')"
-        runQuery(sql, emptyList()) { rs -> ResultStreamer.write(rs, format, out, mapper) }
+        runQuery(report.sql(ch.alerts()), emptyList()) { rs -> ResultStreamer.write(rs, format, out, mapper) }
     }
 
     private fun alertQuery(
@@ -98,22 +88,12 @@ class S3ReportRepository(
         filter: AlertFilter,
         withOrderLimit: Boolean,
     ): Pair<String, List<Any>> {
-        val sql = StringBuilder("SELECT $select FROM read_parquet('${s3.alertsGlob()}', hive_partitioning=true)")
+        val sql = StringBuilder("SELECT $select FROM ${ch.alerts()}")
         val clauses = mutableListOf<String>()
         val params = mutableListOf<Any>()
 
-        filter.from?.let {
-            clauses += "event_ts >= CAST(? AS TIMESTAMP)"
-            params += tsLiteral(it)
-            clauses += "dt >= CAST(? AS DATE)"
-            params += dateLiteral(it)
-        }
-        filter.to?.let {
-            clauses += "event_ts <= CAST(? AS TIMESTAMP)"
-            params += tsLiteral(it)
-            clauses += "dt <= CAST(? AS DATE)"
-            params += dateLiteral(it)
-        }
+        filter.from?.let { clauses += "timestamp >= parseDateTimeBestEffort(?)"; params += isoUtc(it) }
+        filter.to?.let { clauses += "timestamp <= parseDateTimeBestEffort(?)"; params += isoUtc(it) }
         filter.severity?.let { clauses += "upper(severity) = ?"; params += it.uppercase() }
         filter.type?.let { clauses += "upper(type) = ?"; params += it.uppercase() }
         filter.protocol?.let { clauses += "upper(protocol) = ?"; params += it.uppercase() }
@@ -122,14 +102,14 @@ class S3ReportRepository(
         filter.deviceId?.let { clauses += "deviceId = ?"; params += it }
         filter.destinationPort?.let { clauses += "destinationPort = ?"; params += it }
         filter.minPacketCount?.let { clauses += "packetCount >= ?"; params += it }
-        filter.acknowledged?.let { clauses += "acknowledged = ?"; params += it }
+        filter.acknowledged?.let { clauses += "acknowledged = ?"; params += if (it) 1 else 0 }
 
         if (clauses.isNotEmpty()) {
             sql.append(" WHERE ").append(clauses.joinToString(" AND "))
         }
         if (withOrderLimit) {
-            sql.append(" ORDER BY event_ts DESC LIMIT ?")
-            params += filter.limit
+            // limit is validated/clamped upstream, safe to inline.
+            sql.append(" ORDER BY timestamp DESC LIMIT ").append(filter.limit)
         }
         return sql.toString() to params
     }
@@ -140,14 +120,14 @@ class S3ReportRepository(
         block: (ResultSet) -> T,
     ): T {
         try {
-            root.duplicate().use { conn ->
+            dataSource.connection.use { conn ->
                 conn.prepareStatement(sql).use { ps ->
                     bind(ps, params)
                     ps.executeQuery().use { rs -> return block(rs) }
                 }
             }
         } catch (ex: SQLException) {
-            throw LakeUnavailableException(lakeError(ex), ex)
+            throw LakeUnavailableException("Failed to query ClickHouse: ${ex.message}", ex)
         }
     }
 
@@ -158,30 +138,14 @@ class S3ReportRepository(
         params.forEachIndexed { i, value -> ps.setObject(i + 1, value) }
     }
 
-    private fun lakeError(ex: SQLException): String {
-        val raw = ex.message ?: "unknown error"
-        return when {
-            !s3.hasCredentials -> "S3 credentials are not configured for this service"
-            raw.contains("No files found", ignoreCase = true) ->
-                "No data found in the lake for the requested range"
-            raw.contains("HTTP", ignoreCase = true) || raw.contains("403") || raw.contains("Access Denied", ignoreCase = true) ->
-                "Could not read from S3 (check credentials/region/bucket): $raw"
-            else -> "Failed to read from the S3 lake: $raw"
-        }
-    }
-
-    private fun tsLiteral(instant: Instant): String = TS.format(instant)
-
-    private fun dateLiteral(instant: Instant): String = DATE.format(instant)
+    private fun isoUtc(instant: Instant): String = TS.format(instant)
 
     companion object {
-        /** Output schema for alert exports (event_ts surfaced as `timestamp`). */
         private const val EXPORT_COLUMNS =
-            "alertId, event_ts AS timestamp, type, severity, protocol, " +
-                "sourceIp, sourcePort, destinationIp, destinationPort, " +
-                "packetCount, bytesCount, windowSeconds, deviceId, acknowledged, dt"
+            "alertId, timestamp, type, severity, protocol, sourceIp, sourcePort, " +
+                "destinationIp, destinationPort, packetCount, bytesCount, windowSeconds, " +
+                "deviceId, acknowledged, dt"
 
         private val TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneOffset.UTC)
-        private val DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(ZoneOffset.UTC)
     }
 }

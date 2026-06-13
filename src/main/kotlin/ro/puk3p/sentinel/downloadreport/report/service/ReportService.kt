@@ -3,14 +3,14 @@ package ro.puk3p.sentinel.downloadreport.report.service
 import org.springframework.stereotype.Service
 import ro.puk3p.sentinel.downloadreport.common.BadRequestException
 import ro.puk3p.sentinel.downloadreport.config.DownloadProperties
-import ro.puk3p.sentinel.downloadreport.config.S3Properties
 import ro.puk3p.sentinel.downloadreport.report.dto.CuratedReportInfo
+import ro.puk3p.sentinel.downloadreport.report.dto.DateRange
 import ro.puk3p.sentinel.downloadreport.report.dto.FilterMeta
 import ro.puk3p.sentinel.downloadreport.report.dto.PreviewResponse
 import ro.puk3p.sentinel.downloadreport.report.model.AlertFilter
 import ro.puk3p.sentinel.downloadreport.report.model.CuratedReport
 import ro.puk3p.sentinel.downloadreport.report.model.ReportFormat
-import ro.puk3p.sentinel.downloadreport.report.repository.S3ReportRepository
+import ro.puk3p.sentinel.downloadreport.report.repository.ClickHouseReportRepository
 import java.io.OutputStream
 import java.time.Instant
 import java.time.LocalDate
@@ -19,8 +19,7 @@ import java.time.format.DateTimeFormatter
 
 @Service
 class ReportService(
-    private val repository: S3ReportRepository,
-    private val s3: S3Properties,
+    private val repository: ClickHouseReportRepository,
     private val limits: DownloadProperties,
 ) {
     fun streamAlerts(
@@ -47,8 +46,8 @@ class ReportService(
             types = TYPES,
             protocols = PROTOCOLS,
             formats = ReportFormat.entries.map { it.name.lowercase() },
-            dateRange = runCatching { repository.dateRange() }.getOrElse { DateRangeEmpty },
-            bucket = s3.bucket,
+            dateRange = runCatching { repository.dateRange() }.getOrElse { DateRange(null, null) },
+            totalRows = runCatching { repository.totalRows() }.getOrElse { 0L },
             maxRows = limits.maxRows,
         )
 
@@ -106,6 +105,5 @@ class ReportService(
         private val PROTOCOLS = listOf("TCP", "UDP", "ICMP", "UNKNOWN")
         private val TYPES =
             listOf("UDP_FLOOD_SUSPECTED", "PORT_SCAN_SUSPECTED", "TCP_SPIKE_SUSPECTED", "HIGH_TRAFFIC_VOLUME", "UNKNOWN")
-        private val DateRangeEmpty = ro.puk3p.sentinel.downloadreport.report.dto.DateRange(null, null)
     }
 }

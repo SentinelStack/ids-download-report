@@ -14,14 +14,14 @@ data class DateRange(
     val max: String?,
 )
 
-/** Drives a download form: available filter values + the lake's date span. */
+/** Drives a download form: available filter values + the store's date span. */
 data class FilterMeta(
     val severities: List<String>,
     val types: List<String>,
     val protocols: List<String>,
     val formats: List<String>,
     val dateRange: DateRange,
-    val bucket: String,
+    val totalRows: Long,
     val maxRows: Int,
 )
 
