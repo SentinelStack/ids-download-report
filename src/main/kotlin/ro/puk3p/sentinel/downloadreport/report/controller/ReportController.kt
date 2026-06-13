@@ -37,6 +37,7 @@ class ReportController(
                 reportService.meta(),
                 linkTo(methodOn(ReportController::class.java).meta()).withSelfRel(),
                 linkTo(methodOn(ReportController::class.java).preview(AlertFilterParams())).withRel("preview"),
+                linkTo(methodOn(ReportController::class.java).downloadAlerts(AlertFilterParams(), null)).withRel("download"),
                 linkTo(methodOn(ReportController::class.java).curated()).withRel("curated"),
             )
         return ApiResponse.ok(model, "Filter metadata")
@@ -51,6 +52,7 @@ class ReportController(
                 preview,
                 linkTo(methodOn(ReportController::class.java).preview(params)).withSelfRel(),
                 linkTo(methodOn(ReportController::class.java).meta()).withRel("meta"),
+                linkTo(methodOn(ReportController::class.java).downloadAlerts(params, null)).withRel("download"),
             )
         return ApiResponse.ok(model, "Preview")
     }
@@ -67,12 +69,19 @@ class ReportController(
         return download("alerts", fmt, body)
     }
 
-    /** List the curated reports. */
+    /** List the curated reports; each item links to its own download. */
     @GetMapping("/curated")
-    fun curated(): ApiResponse<CollectionModel<CuratedReportInfo>> {
+    fun curated(): ApiResponse<CollectionModel<EntityModel<CuratedReportInfo>>> {
+        val items =
+            reportService.curatedCatalog().map { info ->
+                EntityModel.of(
+                    info,
+                    linkTo(methodOn(ReportController::class.java).downloadCurated(info.key, null)).withRel("download"),
+                )
+            }
         val model =
             CollectionModel.of(
-                reportService.curatedCatalog(),
+                items,
                 linkTo(methodOn(ReportController::class.java).curated()).withSelfRel(),
                 linkTo(methodOn(ReportController::class.java).meta()).withRel("meta"),
             )
