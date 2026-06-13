@@ -30,3 +30,14 @@ data class CuratedReportInfo(
     val label: String,
     val description: String,
 )
+
+data class VolumeBar(
+    val height: Int,
+    val hot: Boolean,
+)
+
+/** 24 hourly threat-volume buckets over the last 24h, computed from ClickHouse. */
+data class ThreatVolumeView(
+    val delta: String,
+    val bars: List<VolumeBar>,
+)

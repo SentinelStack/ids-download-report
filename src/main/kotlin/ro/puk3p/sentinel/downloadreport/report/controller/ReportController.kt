@@ -17,6 +17,7 @@ import ro.puk3p.sentinel.downloadreport.common.ApiResponse
 import ro.puk3p.sentinel.downloadreport.report.dto.CuratedReportInfo
 import ro.puk3p.sentinel.downloadreport.report.dto.FilterMeta
 import ro.puk3p.sentinel.downloadreport.report.dto.PreviewResponse
+import ro.puk3p.sentinel.downloadreport.report.dto.ThreatVolumeView
 import ro.puk3p.sentinel.downloadreport.report.model.AlertFilterParams
 import ro.puk3p.sentinel.downloadreport.report.model.CuratedReport
 import ro.puk3p.sentinel.downloadreport.report.model.ReportFormat
@@ -67,6 +68,18 @@ class ReportController(
         val filter = reportService.buildFilter(params)
         val body = StreamingResponseBody { out -> reportService.streamAlerts(filter, fmt, out) }
         return download("alerts", fmt, body)
+    }
+
+    /** 24-hour threat-volume histogram from ClickHouse (full history, not the 1h hot store). */
+    @GetMapping("/volume")
+    fun volume(): ApiResponse<EntityModel<ThreatVolumeView>> {
+        val model =
+            EntityModel.of(
+                reportService.threatVolume(),
+                linkTo(methodOn(ReportController::class.java).volume()).withSelfRel(),
+                linkTo(methodOn(ReportController::class.java).meta()).withRel("meta"),
+            )
+        return ApiResponse.ok(model, "Threat volume (24h)")
     }
 
     /** List the curated reports; each item links to its own download. */

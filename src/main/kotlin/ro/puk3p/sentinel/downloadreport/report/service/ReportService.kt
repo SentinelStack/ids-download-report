@@ -41,6 +41,8 @@ class ReportService(
     fun curatedCatalog(): List<CuratedReportInfo> =
         CuratedReport.entries.map { CuratedReportInfo(it.key, it.label, it.description) }
 
+    fun threatVolume() = repository.threatVolume()
+
     fun meta(): FilterMeta =
         FilterMeta(
             severities = SEVERITIES,

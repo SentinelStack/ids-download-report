@@ -6,6 +6,8 @@ import ro.puk3p.sentinel.downloadreport.common.LakeUnavailableException
 import ro.puk3p.sentinel.downloadreport.config.ClickHouseProperties
 import ro.puk3p.sentinel.downloadreport.report.dto.DateRange
 import ro.puk3p.sentinel.downloadreport.report.dto.PreviewResponse
+import ro.puk3p.sentinel.downloadreport.report.dto.ThreatVolumeView
+import ro.puk3p.sentinel.downloadreport.report.dto.VolumeBar
 import ro.puk3p.sentinel.downloadreport.report.model.AlertFilter
 import ro.puk3p.sentinel.downloadreport.report.model.CuratedReport
 import ro.puk3p.sentinel.downloadreport.report.model.ReportFormat
@@ -17,6 +19,7 @@ import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import javax.sql.DataSource
+import kotlin.math.roundToInt
 
 /**
  * The ClickHouse-backed report repository. Alerts are streamed into ClickHouse
@@ -72,6 +75,28 @@ class ClickHouseReportRepository(
     fun totalRows(): Long {
         val sql = "SELECT count() FROM ${ch.alerts()}"
         return runQuery(sql, emptyList()) { rs -> if (rs.next()) rs.getLong(1) else 0L }
+    }
+
+    /** 24 hourly buckets over the last 24h (oldest→newest), aligned to ClickHouse's clock. */
+    fun threatVolume(): ThreatVolumeView {
+        val nowHour =
+            runQuery("SELECT toUnixTimestamp(toStartOfHour(now()))", emptyList()) { rs ->
+                if (rs.next()) rs.getLong(1) else 0L
+            }
+        val counts = HashMap<Long, Long>()
+        runQuery(
+            "SELECT toUnixTimestamp(toStartOfHour(timestamp)) AS h, count() AS c " +
+                "FROM ${ch.alerts()} WHERE timestamp >= now() - INTERVAL 24 HOUR GROUP BY h",
+            emptyList(),
+        ) { rs -> while (rs.next()) counts[rs.getLong("h")] = rs.getLong("c") }
+
+        val series = (0 until 24).map { i -> counts[nowHour - (23 - i) * 3600L] ?: 0L }
+        val max = (series.maxOrNull() ?: 0L).coerceAtLeast(1L)
+        val threshold = max * 0.75
+        val bars = series.map { VolumeBar(((it.toDouble() / max) * 100).roundToInt(), it >= threshold && it > 0) }
+
+        val recent = series.sum()
+        return ThreatVolumeView("$recent in last 24h", bars)
     }
 
     /** Stream a curated report (a live aggregate over the alerts table). */
