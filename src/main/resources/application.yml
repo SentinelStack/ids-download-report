@@ -1,5 +1,7 @@
 server:
   port: ${SERVER_PORT:8085}
+  # Honour X-Forwarded-* from nginx so HATEOAS links use the public https host.
+  forward-headers-strategy: framework
 
 spring:
   application:
