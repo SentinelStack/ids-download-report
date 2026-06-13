@@ -1,0 +1,61 @@
+name: IDS Download Report CI
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      deploy_qa:
+        description: "Deploy current commit to QA"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  quality-gates:
+    name: Build, Test and Quality Gates
+    uses: SentinelStack/ids-infra-devops/.github/workflows/reusable-maven-quality.yml@main
+    with:
+      java_version: "21"
+      artifact_name: download-report-jar
+      # Kotlin-only module: no Checkstyle/PMD/SpotBugs (Java) gates.
+      run_checkstyle: false
+      run_pmd: false
+      run_spotbugs: false
+    secrets:
+      nexus_username: ${{ secrets.NEXUS_USERNAME }}
+      nexus_password: ${{ secrets.NEXUS_PASSWORD }}
+
+  deploy-nexus:
+    name: Deploy Artifact to Nexus
+    if: github.event_name == 'push'
+    needs: quality-gates
+    uses: SentinelStack/ids-infra-devops/.github/workflows/reusable-maven-publish-nexus.yml@main
+    with:
+      java_version: "21"
+    secrets:
+      nexus_username: ${{ secrets.NEXUS_USERNAME }}
+      nexus_password: ${{ secrets.NEXUS_PASSWORD }}
+
+  deploy-qa:
+    name: Manual Deploy to QA
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_qa == 'true'
+    needs: quality-gates
+    uses: SentinelStack/ids-infra-devops/.github/workflows/reusable-ssh-jar-deploy.yml@main
+    with:
+      artifact_name: download-report-jar
+      deploy_path: /opt/ids-download-report
+      service_name: ids-download-report
+      jar_name: app.jar
+      environment: qa
+      vault_render: false
+    secrets:
+      ssh_host: ${{ secrets.QA_SSH_HOST }}
+      ssh_user: ${{ secrets.QA_SSH_USER }}
+      ssh_private_key: ${{ secrets.QA_SSH_PRIVATE_KEY }}

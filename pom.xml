@@ -23,6 +23,40 @@
         <spotless.maven.plugin.version>2.43.0</spotless.maven.plugin.version>
     </properties>
 
+    <distributionManagement>
+        <repository>
+            <id>nexus-releases</id>
+            <url>https://nexus.puk3p.online/repository/maven-releases/</url>
+        </repository>
+        <snapshotRepository>
+            <id>nexus-snapshots</id>
+            <url>https://nexus.puk3p.online/repository/maven-snapshots/</url>
+        </snapshotRepository>
+    </distributionManagement>
+
+    <repositories>
+        <repository>
+            <id>nexus-releases</id>
+            <url>https://nexus.puk3p.online/repository/maven-releases/</url>
+            <releases>
+                <enabled>true</enabled>
+            </releases>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
+        </repository>
+        <repository>
+            <id>nexus-snapshots</id>
+            <url>https://nexus.puk3p.online/repository/maven-snapshots/</url>
+            <releases>
+                <enabled>false</enabled>
+            </releases>
+            <snapshots>
+                <enabled>true</enabled>
+            </snapshots>
+        </repository>
+    </repositories>
+
     <dependencies>
         <dependency>
             <groupId>org.springframework.boot</groupId>
