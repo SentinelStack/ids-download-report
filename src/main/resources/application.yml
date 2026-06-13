@@ -1,0 +1,39 @@
+server:
+  port: ${SERVER_PORT:8085}
+
+spring:
+  application:
+    name: ids-download-report
+  mvc:
+    async:
+      # Streamed downloads scan many small Parquet files over S3; give them room.
+      request-timeout: 300000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+app:
+  cors:
+    # Comma-separated browser origins allowed to call /api/**.
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:4200}
+  s3:
+    bucket: ${S3_BUCKET:sentinel-ids-lake}
+    region: ${AWS_REGION:eu-north-1}
+    access-key: ${AWS_ACCESS_KEY_ID:}
+    secret-key: ${AWS_SECRET_ACCESS_KEY:}
+    alerts-prefix: ${S3_ALERTS_PREFIX:alerts}
+    reports-prefix: ${S3_REPORTS_PREFIX:reports}
+  download:
+    max-rows: ${DOWNLOAD_MAX_ROWS:200000}
+    default-rows: ${DOWNLOAD_DEFAULT_ROWS:50000}
+    preview-rows: ${DOWNLOAD_PREVIEW_ROWS:100}
+  duckdb:
+    # Writable dir for DuckDB's extension cache. Empty = auto (DUCKDB_HOME env,
+    # then user.home, then a temp dir). Set explicitly under systemd.
+    home-directory: ${DUCKDB_HOME:}
+    # Read parallelism. The lake is many small Parquet files over S3, so reads
+    # are network-bound — more threads than cores helps throughput.
+    threads: ${DUCKDB_THREADS:16}
